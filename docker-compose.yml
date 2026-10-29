@@ -1,0 +1,107 @@
+services:
+  # =========================================================================
+  # DATABASE 1: Dedicated Exclusively to the Authentication Service
+  # =========================================================================
+  auth-postgres-db:
+    image: postgres:15-alpine
+    container_name: hospital-auth-db
+    ports:
+      - "5431:5432" # Exposed externally to host port 5431 to avoid port clashes
+    environment:
+      - POSTGRES_DB=auth_records_db
+      - POSTGRES_USER=auth_admin
+      - POSTGRES_PASSWORD=auth_secure_password
+    volumes:
+      - auth_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U auth_admin -d auth_records_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # =========================================================================
+  # DATABASE 2: Dedicated Exclusively to the OPD Service
+  # =========================================================================
+  opd-postgres-db:
+    image: postgres:15-alpine
+    container_name: hospital-opd-db
+    ports:
+      - "5455:5432" # Exposed externally to host port 5432
+    environment:
+      - POSTGRES_DB=opd_clinical_db
+      - POSTGRES_USER=opd_admin
+      - POSTGRES_PASSWORD=opd_secure_password
+    volumes:
+      - opd_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U opd_admin -d opd_clinical_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # =========================================================================
+  # MICROSERVICE 1: Authentication Engine (Points to Auth DB)
+  # =========================================================================
+  jb-auth-api:
+    build:
+      context: ./jb-auth-service
+      dockerfile: Dockerfile
+    container_name: company-secure-api
+    expose:
+      - "8080"
+    depends_on:
+      auth-postgres-db:
+        condition: service_healthy
+    environment:
+      - SPRING_DOCKER_COMPOSE_ENABLED=false
+      - APP_JWT_SECRET=dGhpcy1pcy1hLXN1cGVyLXNlY3VyZS1hbmQtbG9uZy1zZWNyZXQta2V5LWZvci1qc29uLXdlYi10b2tlbnM=
+      - APP_JWT_EXPIRATION_MS=86400000
+      # FIX: Targets the isolated Auth Database container network endpoint
+      - SPRING_DATASOURCE_URL=jdbc:postgresql://auth-postgres-db:5432/auth_records_db
+      - SPRING_DATASOURCE_USERNAME=auth_admin
+      - SPRING_DATASOURCE_PASSWORD=auth_secure_password
+
+  # =========================================================================
+  # MICROSERVICE 2: Outpatient Department Service (Points to OPD DB)
+  # =========================================================================
+  jb-opd-service:
+    build:
+      context: ./jb-opd-service
+      dockerfile: Dockerfile
+    container_name: jb-opd-service
+    expose:
+      - "8082"
+    depends_on:
+      opd-postgres-db:
+        condition: service_healthy
+    environment:
+      - SPRING_APPLICATION_JSON={"server.port":8082}
+      - APP_JWT_SECRET=dGhpcy1pcy1hLXN1cGVyLXNlY3VyZS1hbmQtbG9uZy1zZWNyZXQta2V5LWZvci1qc29uLXdlYi10b2tlbnM=
+      # FIX: Targets the isolated OPD Database container network endpoint
+      - SPRING_DATASOURCE_URL=jdbc:postgresql://opd-postgres-db:5432/opd_clinical_db
+      - SPRING_DATASOURCE_USERNAME=opd_admin
+      - SPRING_DATASOURCE_PASSWORD=opd_secure_password
+      # Since this is a dedicated database, we can safely write to the default 'public' workspace schema
+      - SPRING_FLYWAY_SCHEMAS=public
+      - SPRING_JPA_PROPERTIES_HIBERNATE_DEFAULT_SCHEMA=public
+    restart: always
+
+  # =========================================================================
+  # MICROSERVICE 3: API Gateway (Remains Unchanged)
+  # =========================================================================
+  jb-gateway:
+    build:
+      context: ./jb-gateway
+      dockerfile: Dockerfile
+    container_name: jb-gateway
+    ports:
+      - "8080:8080"
+    depends_on:
+      - jb-auth-api
+      - jb-opd-service
+    restart: always
+
+# DEFINES SEPARATE STORAGE VOLUMES TO PREVENT DATA CORRUPTION
+volumes:
+  auth_db_data:
+  opd_db_data:
