@@ -1,0 +1,34 @@
+server:
+  port: 8080 # The single open gateway entrypoint for the entire architecture
+
+spring:
+  application:
+    name: jb-gateway
+  cloud:
+    gateway:
+      # CENTRALIZED SECURITY FACTOR: Global CORS Policy Configurations
+      globalcors:
+        cors-configurations:
+          '[/**]':
+            allowedOrigins: "http://localhost:3000" # Allows only your frontend Web App (e.g. React/Next.js)
+            allowedMethods:
+              - GET
+              - POST
+              - PUT
+              - DELETE
+            allowedHeaders: "*"
+            allowCredentials: true
+
+      # THE ROUTING ENGINE
+      routes:
+        # 1. Routing for the Authentication Service
+        - id: auth-service-route
+          uri: http://company-secure-api:8080 # Routes over internal Docker network to Auth container port
+          predicates:
+            - Path=/api/v1/auth/**
+
+        # 2. Routing for the Outpatient Department (OPD) Service
+        - id: opd-service-route
+          uri: http://jb-opd-service:8082 # Routes over internal Docker network to OPD container port
+          predicates:
+            - Path=/api/v1/opd/**

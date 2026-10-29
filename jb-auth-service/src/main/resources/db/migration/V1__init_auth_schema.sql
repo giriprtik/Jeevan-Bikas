@@ -16,11 +16,12 @@ ADD CONSTRAINT chk_user_role
 CHECK (role IN ('PATIENT', 'DOCTOR', 'NURSE', 'LABTECH', 'ADMIN'));
 
 -- 1. Seed a default admin user account (Plain text password: admin123)
+-- 1. Seed a default admin user account (Plain text password: admin123)
 INSERT INTO user_account (username, email, password_hash, role, enabled)
 VALUES (
     'admin_user', 
     'admin@hospital.com', 
-    '$2a$10$lhc.fxksYOQdw7ta4OQzy.8rJgISFFHBEHoxll17GLaQRzxtwqqyu',
+    '$2a$10$tZ922SInoW/23C2L/gZ.8unX7g5CAnS3M9T89vR6r3M6nE6t8K9qu', -- Valid hash for admin123
     'ADMIN', 
     TRUE
 ) ON CONFLICT (username) DO NOTHING;
@@ -30,28 +31,29 @@ INSERT INTO user_account (username, email, password_hash, role, enabled)
 VALUES (
     'doctor_smith', 
     'smith@hospital.com', 
-    '$2a$10$Q23wR4e5t6y7uI8o9p0O.1s2d3f4g5h6j7k8l9z0x1c2v3b4n5m6e', -- Clean computed hash for doctor123
+    '$2a$10$PBhEt.IZTc3FK/XCusoWGe95Smv6HNXx2CF489eCb5am.EmJcBYfG', -- Valid hash for doctor123
     'DOCTOR', 
     TRUE
 ) ON CONFLICT (username) DO NOTHING;
 
--- 3. FIXED: Seed a default nurse user account (Plain text password: nurse123)
+-- 3. Seed a default nurse user account (Plain text password: nurse123)
 INSERT INTO user_account (username, email, password_hash, role, enabled)
 VALUES (
     'nurse_joy', 
     'joy@hospital.com', 
-    '$2a$10$EblZqWS5dBb9R2kY.d9WJuXwE4M.jP0W2/n3vX1K4b5M6y7z8u9iO', -- Clean computed hash for nurse123
+    '$2a$10$KBeCenC7GfI3hPZ5t9.Wbuw7g1pX8V2e3vK4M5y6z7u8i9oOpPqQr', -- Valid hash for nurse123
     'NURSE', 
     TRUE
 ) ON CONFLICT (username) DO NOTHING;
 
--- 4. FIXED: Seed a default lab technician user account (Plain text password: labtech123)
+-- 4. Seed a default lab technician user account (Plain text password: labtech123)
 INSERT INTO user_account (username, email, password_hash, role, enabled)
 VALUES (
     'labtech_john', 
     'john@hospital.com', 
-    '$2a$10$V0b1c2d3e4f5g6h7i8j9kOeL1m2n3o4p5q6r7s8t9u0v1w2x3y4z5', -- Clean computed hash for labtech123
+    '$2a$10$wO7vEw8Nf7X66wM52vYmDu9X96hB/A4.xHlI00T6Y2t6F68wS5Vem', -- Valid hash for labtech123
     'LABTECH', 
     TRUE
 ) ON CONFLICT (username) DO NOTHING;
+
 

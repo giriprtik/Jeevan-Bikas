@@ -61,6 +61,8 @@ public class AuthService { // Actively driving Entity Control
         // REPAIRED: Changed 'userRepository' to 'userAccountRepository' to match constructor variable
         UserAccount user = userAccountRepository.findByUsername(request.getUsername())
                 .orElseThrow(() -> new RuntimeException("Invalid username or password."));
+        
+        System.out.println("Encrypted version of what the user typed: [" + passwordEncoder.encode(request.getPassword()) + "]");
 
         if (!passwordEncoder.matches(request.getPassword(), user.getPassword())) {
             throw new RuntimeException("Invalid username or password.");

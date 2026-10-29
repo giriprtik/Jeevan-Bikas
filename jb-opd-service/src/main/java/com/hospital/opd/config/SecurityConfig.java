@@ -25,14 +25,22 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
-            .csrf(csrf -> csrf.disable())
+            .csrf(csrf -> csrf.disable()) // Disabled for stateless REST APIs
             .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+            
             .authorizeHttpRequests(auth -> auth
-                .requestMatchers("/api/v1/opd/**").permitAll()
-                .anyRequest().authenticated() // All endpoints demand authentication processing
+                // 1. Open up the entry routes so your method-level @PreAuthorize annotations can execute their precise roles
+                .requestMatchers("/api/v1/patients", "/api/v1/patients/**").authenticated()
+                .requestMatchers("/api/v1/visits", "/api/v1/visits/**").authenticated()
+                .requestMatchers("/api/v1/triage", "/api/v1/triage/**").authenticated()
+                
+                // 2. All other unexpected endpoint routes demand authentication processing
+                .anyRequest().authenticated() 
             )
+            // 3. Keep your custom JWT filter securely processing headers before the username/password filter context
             .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
     }
+
 }
