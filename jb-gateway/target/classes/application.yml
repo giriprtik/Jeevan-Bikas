@@ -16,6 +16,7 @@ spring:
               - POST
               - PUT
               - DELETE
+              - OPTIONS
             allowedHeaders: "*"
             allowCredentials: true
 
@@ -23,12 +24,18 @@ spring:
       routes:
         # 1. Routing for the Authentication Service
         - id: auth-service-route
-          uri: http://company-secure-api:8080 # Routes over internal Docker network to Auth container port
+          uri: http://company-secure-api:8081 # ◄ FIXED: Updated to target port 8081
           predicates:
             - Path=/api/v1/auth/**
 
         # 2. Routing for the Outpatient Department (OPD) Service
         - id: opd-service-route
-          uri: http://jb-opd-service:8082 # Routes over internal Docker network to OPD container port
+          uri: http://jb-opd-service:8082 
           predicates:
             - Path=/api/v1/opd/**
+        
+        # 3. Routing for the Laboratory Service
+        - id: lab-service-route
+          uri: http://jb-lab-service:8083 
+          predicates:
+            - Path=/api/v1/lab/**

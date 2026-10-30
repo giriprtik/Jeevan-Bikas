@@ -1,7 +1,6 @@
 package com.hospital.opd.config;
 
 import com.hospital.opd.security.JwtAuthenticationFilter;
-import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
@@ -30,9 +29,9 @@ public class SecurityConfig {
             
             .authorizeHttpRequests(auth -> auth
                 // 1. Open up the entry routes so your method-level @PreAuthorize annotations can execute their precise roles
-                .requestMatchers("/api/v1/patients", "/api/v1/patients/**").authenticated()
-                .requestMatchers("/api/v1/visits", "/api/v1/visits/**").authenticated()
-                .requestMatchers("/api/v1/triage", "/api/v1/triage/**").authenticated()
+                .requestMatchers("/api/v1/opd/patients", "/api/v1/opd/patients/**").authenticated()
+                .requestMatchers("/api/v1/opd/visits", "/api/v1/opd/visits/**").authenticated()
+                .requestMatchers("/api/v1/opd/triage", "/api/v1/opd/triage/**").authenticated()
                 
                 // 2. All other unexpected endpoint routes demand authentication processing
                 .anyRequest().authenticated() 

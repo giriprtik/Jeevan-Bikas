@@ -10,12 +10,15 @@ import org.springframework.stereotype.Component;
 import javax.crypto.SecretKey;
 import java.nio.charset.StandardCharsets;
 import java.util.Date;
+import java.util.List;
+import java.util.stream.Collectors;
 
 @Component
 public class JwtTokenProvider {
 
     private final SecretKey key;
     private final long expirationMs;
+    String commaSeparatedRoles;
 
     public JwtTokenProvider(@Value("${app.jwt.secret}") String secret,
                             @Value("${app.jwt.expiration-ms}") long expirationMs) {
@@ -23,11 +26,15 @@ public class JwtTokenProvider {
         this.expirationMs = expirationMs;
     }
 
-    public String generateToken(String username, String role) {
+    public String generateToken(String username, List <String> roles) {
         Date now = new Date();
+        String commaSeparatedRoles = roles.stream()
+            .map(String::trim)
+            .collect(Collectors.joining(","));
+
         return Jwts.builder()
                 .subject(username)
-                .claim("role", role)
+                .claim("roles", commaSeparatedRoles)
                 .issuedAt(now)
                 .expiration(new Date(now.getTime() + expirationMs))
                 .signWith(key)

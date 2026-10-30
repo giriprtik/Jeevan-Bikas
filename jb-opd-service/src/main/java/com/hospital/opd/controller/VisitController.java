@@ -1,6 +1,7 @@
 package com.hospital.opd.controller;
 
 import com.hospital.opd.dto.VisitRegistrationRequest;
+import com.hospital.opd.dto.VisitConclusionRequest;
 import com.hospital.opd.dto.VisitQueueResponse;
 import com.hospital.opd.model.Visit;
 import com.hospital.opd.service.VisitService;
@@ -65,4 +66,22 @@ public class VisitController {
 
         return ResponseEntity.ok(responseList);
     }
+
+    /**
+     * Finalize and close out an active clinical patient visit encounter.
+     * Restricted strictly to clinical Doctor roles.
+     */
+    @PostMapping("/{id}/conclude")
+    @PreAuthorize("hasRole('DOCTOR')")
+    public ResponseEntity<Void> completeVisitEncounter(
+            @PathVariable Long id,
+            @Valid @RequestBody VisitConclusionRequest request,
+            @AuthenticationPrincipal String doctorUsername) {
+        
+        String actor = doctorUsername != null ? doctorUsername : "ATTENDING_DOCTOR_ACTOR";
+        visitService.concludeConsultation(id, request, actor);
+        
+        return ResponseEntity.noContent().build(); // Returns a clean 204 No Content success flag
+    }
+
 }

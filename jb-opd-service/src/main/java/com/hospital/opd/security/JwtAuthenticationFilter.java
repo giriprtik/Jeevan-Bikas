@@ -14,6 +14,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.List;
 
 @Component
@@ -21,8 +22,6 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     private final JwtTokenProvider jwtTokenProvider;
 
-    // Reads the shared key settings directly out of application.properties
-    // 2. INJECT the dependency using an explicit constructor
     public JwtAuthenticationFilter(JwtTokenProvider jwtTokenProvider) {
         this.jwtTokenProvider = jwtTokenProvider;
     }
@@ -38,13 +37,22 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 String tokenString = header.substring(7);
                 Claims claims = jwtTokenProvider.parse(tokenString);
 
-                // Combines assertion boundaries to reduce indentation nesting
-                if (claims != null && claims.get("role") != null) {
-                    String role = claims.get("role", String.class);
+                // 1. FIXED: Look for the correct plural "roles" key matching your Auth service claim
+                if (claims != null && claims.get("roles") != null) {
+                    String rolesString = claims.get("roles", String.class); // e.g. "NURSE" or "NURSE,STAFF"
                     
-                    // Formats target security context strings clean
-                    String formattedRole = role.startsWith("ROLE_") ? role : "ROLE_" + role;
-                    var authorities = List.of(new SimpleGrantedAuthority(formattedRole));
+                    // 2. FIXED: Split the comma-separated string cleanly into a Spring authorities collection
+                    List<SimpleGrantedAuthority> authorities = Arrays.stream(rolesString.split(","))
+                            .map(String::trim)
+                            .map(role -> role.startsWith("ROLE_") ? role : "ROLE_" + role)
+                            .map(SimpleGrantedAuthority::new)
+                            .toList();
+
+                    System.out.println("=== [JWT SECURITY CHECK SUCCESS] ===");
+                    System.out.println("User logging in: " + claims.getSubject());
+                    System.out.println("Raw roles from JWT token: " + rolesString);
+                    System.out.println("Granted Authorities set in Spring: " + authorities);
+                    System.out.println("====================================");
                     
                     var auth = new UsernamePasswordAuthenticationToken(
                             claims.getSubject(), 
@@ -56,7 +64,6 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                     SecurityContextHolder.getContext().setAuthentication(auth);
                 }
             } catch (Exception e) {
-                // Production log practice: avoids long printStackTrace console locking blocks
                 logger.error("JWT Authentication signature validation failed: " + e.getMessage());
                 SecurityContextHolder.clearContext();
             }

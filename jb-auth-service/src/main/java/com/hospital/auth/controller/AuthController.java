@@ -80,7 +80,6 @@ public class AuthController { // Streamlined Boundary Layer
     @GetMapping("/admin/ping")
     @PreAuthorize("hasRole('ADMIN')")
     public String adminPing() {
-        System.out.println(">>> [CONTROLLER ACCESS GRANTED] Executing adminPing method successfully!");
         return "{\"message\": \"admin only\"}"; // Hardcoded clean JSON payload bypasses Jackson mapping checks
     }
 

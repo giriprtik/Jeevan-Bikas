@@ -1,6 +1,7 @@
-package com.hospital.auth.exception;
+package com.hospital.lab.exception;
 
-import com.hospital.auth.controller.AuthController;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -15,11 +16,8 @@ import java.util.Map;
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
-    @ExceptionHandler(AuthController.BadCredentialsException.class)
-    public ResponseEntity<Map<String, Object>> badCredentials(AuthController.BadCredentialsException ex) {
-        return body(HttpStatus.UNAUTHORIZED, ex.getMessage());
-    }
-
+    private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
+    
     @ExceptionHandler(AccessDeniedException.class)
     public ResponseEntity<Map<String, Object>> denied(AccessDeniedException ex) {
         return body(HttpStatus.FORBIDDEN, "Access denied");
@@ -41,20 +39,24 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(Exception.class)
     public ResponseEntity<Map<String, Object>> generic(Exception ex) throws Exception {
         
-        // CRITICAL DEPLOYMENT FIX: Pass through Spring Security exceptions to let them render as clean 403 blocks
         if (ex instanceof org.springframework.security.access.AccessDeniedException || 
             ex instanceof org.springframework.security.authorization.AuthorizationDeniedException) {
             throw ex; 
         }
 
-        // Standard generic 500 error handler fallback format mapping
-        Map<String, Object> body = Map.of(
-            "timestamp", Instant.now().toString(),
-            "status", HttpStatus.INTERNAL_SERVER_ERROR.value(),
-            "error", "Internal Server Error",
-            "message", "Unexpected error"
-        );
+        // 2. CRITICAL FOR DEBUGGING: Log the actual error and full stack trace
+        log.error("Unhandled internal server error occurred: ", ex);
+
+        // 3. Structured map preserving insertion order
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("timestamp", Instant.now().toString());
+        body.put("status", HttpStatus.INTERNAL_SERVER_ERROR.value());
+        body.put("error", "Internal Server Error");
         
+        // 4. OPTIONAL DEVELOPMENT AID: Expose the real message temporarily to debug faster
+        body.put("message", ex.getMessage() != null ? ex.getMessage() : "Unexpected error");
+        // body.put("developerMessage", ex.getClass().getName()); // Uncomment to see the exact Exception class
+
         return new ResponseEntity<>(body, HttpStatus.INTERNAL_SERVER_ERROR);
     }
 

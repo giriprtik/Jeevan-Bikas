@@ -1,5 +1,6 @@
 package com.hospital.opd.service;
 
+import com.hospital.opd.dto.VisitConclusionRequest;
 import com.hospital.opd.dto.VisitRegistrationRequest;
 import com.hospital.opd.model.*;
 import com.hospital.opd.repository.*;
@@ -125,4 +126,41 @@ public class VisitService {
         // Fetches only patients who have finished triage and are waiting to see the doctor
         return visitRepository.findActiveQueue(doctorUsername, todayInNepal, VisitStatus.TRIAGED);
     }
+
+    /**
+     * Concludes a patient's outpatient consultation encounter session.
+     * Persists clinical documentation summaries and closes out the active lifecycle tracking token.
+     */
+    @Transactional
+    public void concludeConsultation(Long visitId, VisitConclusionRequest request, String doctorUsername) {
+        // 1. Fetch the target active visit case record
+        Visit visit = visitRepository.findById(visitId)
+                .orElseThrow(() -> new IllegalArgumentException("Medical visit encounter file record not found for ID: " + visitId));
+
+        // 2. Guardrail Constraint: Assert the session is in a logically terminable state
+        if (visit.getStatus() == VisitStatus.COMPLETED || visit.getStatus() == VisitStatus.CANCELLED) {
+            throw new IllegalStateException("This consultation case record session has already been finalized and locked.");
+        }
+
+        String historicalPreviousStatus = visit.getStatus().name();
+
+        // 3. Populate final clinical summary records onto the entity row instance
+        visit.setConsultationNotes(request.getConsultationNotes().trim());
+        visit.setDiagnosis(request.getDiagnosis().trim());
+        visit.setStatus(VisitStatus.COMPLETED);
+        visit.setCompletedAt(OffsetDateTime.now()); // Captured precisely via your default Nepal timezone settings
+
+        Visit savedVisit = visitRepository.save(visit);
+
+        // 4. Drop automated append-only clinical audit history tracking record
+        VisitEvent conclusionLog = new VisitEvent(
+                savedVisit.getId(),
+                historicalPreviousStatus,
+                VisitStatus.COMPLETED.name(),
+                doctorUsername,
+                "Consultation successfully finalized by attending doctor. Diagnosis: " + request.getDiagnosis().trim()
+        );
+        visitEventRepository.save(conclusionLog);
+    }
+
 }

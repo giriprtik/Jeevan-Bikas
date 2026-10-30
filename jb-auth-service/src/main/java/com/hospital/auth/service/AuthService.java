@@ -11,6 +11,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.OffsetDateTime;
+import java.util.List;
 
 @Service
 public class AuthService { // Actively driving Entity Control
@@ -62,8 +63,6 @@ public class AuthService { // Actively driving Entity Control
         UserAccount user = userAccountRepository.findByUsername(request.getUsername())
                 .orElseThrow(() -> new RuntimeException("Invalid username or password."));
         
-        System.out.println("Encrypted version of what the user typed: [" + passwordEncoder.encode(request.getPassword()) + "]");
-
         if (!passwordEncoder.matches(request.getPassword(), user.getPassword())) {
             throw new RuntimeException("Invalid username or password.");
         }
@@ -73,7 +72,8 @@ public class AuthService { // Actively driving Entity Control
         }
 
         // Issue cryptographic access tokens based on internal Entity properties
-        String token = tokenProvider.generateToken(user.getUsername(), user.getRole());
+        List<String> rolesList = List.of(user.getRole());
+        String token = tokenProvider.generateToken(user.getUsername(), rolesList);
         
         // REPAIRED: Structured response mapping to cleanly match the LoginResponse template
         return new LoginResponse(
