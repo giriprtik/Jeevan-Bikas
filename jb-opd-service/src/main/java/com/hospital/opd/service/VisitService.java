@@ -1,166 +1,168 @@
 package com.hospital.opd.service;
 
-import com.hospital.opd.dto.VisitConclusionRequest;
+import com.hospital.opd.dto.StaffSummary;
+import com.hospital.opd.dto.VisitQueueItem;
 import com.hospital.opd.dto.VisitRegistrationRequest;
+import com.hospital.opd.exception.ResourceNotFoundException;
 import com.hospital.opd.model.*;
 import com.hospital.opd.repository.*;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.time.LocalDate;
-import java.time.OffsetDateTime;
+import java.time.ZoneId;
+import java.util.Collection;
+import java.util.EnumSet;
 import java.util.List;
+import java.util.Set;
 
 @Service
 public class VisitService {
+
+    public static final ZoneId HOSPITAL_ZONE = ZoneId.of("Asia/Kathmandu");
 
     private final VisitRepository visitRepository;
     private final PatientRepository patientRepository;
     private final TokenCounterRepository tokenCounterRepository;
     private final VisitEventRepository visitEventRepository;
+    private final DoctorIntegrationService doctorIntegrationService;
+    private final LabIntegrationService labIntegrationService;
 
     public VisitService(VisitRepository visitRepository,
                         PatientRepository patientRepository,
                         TokenCounterRepository tokenCounterRepository,
-                        VisitEventRepository visitEventRepository) {
+                        VisitEventRepository visitEventRepository,
+                        DoctorIntegrationService doctorIntegrationService,
+                        LabIntegrationService labIntegrationService) {
         this.visitRepository = visitRepository;
         this.patientRepository = patientRepository;
         this.tokenCounterRepository = tokenCounterRepository;
         this.visitEventRepository = visitEventRepository;
+        this.doctorIntegrationService = doctorIntegrationService;
+        this.labIntegrationService = labIntegrationService;
+    }
+
+    /** Returning patient: open a new visit by MRN. */
+    @Transactional
+    public VisitQueueItem registerVisit(VisitRegistrationRequest request, String registrar) {
+        Patient patient = patientRepository.findByMrn(request.patientMrn().trim())
+                .orElseThrow(() -> new ResourceNotFoundException("No patient found with MRN " + request.patientMrn()));
+        StaffSummary doctor = doctorIntegrationService.requireDoctor(request.assignedDoctorUsername().trim());
+        Visit visit = openVisit(patient, request.chiefComplaint(), request.priority(), doctor, registrar);
+        return queueItem(visit.getId());
     }
 
     /**
-     * Registers a new patient outpatient clinic encounter.
-     * Automates thread-safe daily token increments and creates an initial audit log entry.
+     * Opens a visit and issues today's next token. Must run inside the caller's transaction so the
+     * token, visit row and audit event commit (or roll back) together.
      */
-    @Transactional
-    public Visit registerVisit(VisitRegistrationRequest request, String registrarUsername) {
-        // 1. Fetch patient master context by MRN
-        Patient patient = patientRepository.findByMrn(request.getPatientMrn())
-                .orElseThrow(() -> new IllegalArgumentException("No registered patient profile found for MRN: " + request.getPatientMrn()));
-
-        // 2. Guardrail Constraint Check: Assert patient doesn't already have an open visit today
-        if (visitRepository.hasActiveVisit(patient.getId())) {
-            throw new IllegalStateException("Patient currently has an active open visit case record. Close or cancel the prior session first.");
+    @Transactional(propagation = Propagation.MANDATORY)
+    public Visit openVisit(Patient patient, String chiefComplaint, VisitPriority priority,
+                           StaffSummary doctor, String registrar) {
+        if (patient.getId() != null && visitRepository.hasActiveVisit(patient.getId())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    patient.getFullName() + " already has an open visit today. Complete or cancel it first.");
         }
 
-        // 3. Evaluate contemporary Nepal date window for atomic token allocation grouping
-        LocalDate todayInNepal = LocalDate.now();
+        LocalDate today = LocalDate.now(HOSPITAL_ZONE);
+        tokenCounterRepository.incrementAtomicToken(today);   // INSERT ... ON CONFLICT DO UPDATE: row-locked, race-free
+        Integer token = tokenCounterRepository.getCurrentTokenValue(today);
 
-        // 4. Fire thread-safe upsert routine to advance token queue numbers atomically
-        tokenCounterRepository.incrementAtomicToken(todayInNepal);
-        Integer assignedToken = tokenCounterRepository.getCurrentTokenValue(todayInNepal);
-
-        // 5. Instantiation mapping configuration 
         Visit visit = new Visit();
         visit.setPatient(patient);
-        visit.setVisitDate(todayInNepal);
-        visit.setTokenNumber(assignedToken);
-        visit.setChiefComplaint(request.getChiefComplaint().trim());
-        visit.setPriority(request.getPriority());
+        visit.setVisitDate(today);
+        visit.setTokenNumber(token);
+        visit.setChiefComplaint(chiefComplaint.trim());
+        visit.setPriority(priority);
         visit.setStatus(VisitStatus.REGISTERED);
-        
-        if (request.getAssignedDoctor() != null) {
-            visit.setAssignedDoctor(request.getAssignedDoctor().trim());
-        }
-        if (request.getAssignedDoctorName() != null) {
-            visit.setAssignedDoctorName(request.getAssignedDoctorName().trim());
-        }
-        
-        visit.setRegisteredBy(registrarUsername);
+        visit.setAssignedDoctorId(doctor.id());
+        visit.setAssignedDoctorUsername(doctor.username());
+        visit.setAssignedDoctorName(doctor.fullName());
+        visit.setRegisteredBy(registrar);
+        Visit saved = visitRepository.save(visit);
 
-        Visit savedVisit = visitRepository.save(visit);
-
-        // 6. Write Initial Audit Stamp Entry Ledger
-        VisitEvent initialLog = new VisitEvent(
-                savedVisit.getId(),
-                null, // fromStatus is null for fresh registrations
-                VisitStatus.REGISTERED.name(),
-                registrarUsername,
-                "Patient successfully registered at entry desk. Issued Token #" + assignedToken
-        );
-        visitEventRepository.save(initialLog);
-
-        return savedVisit;
+        recordEvent(saved.getId(), null, VisitStatus.REGISTERED, registrar,
+                "Registered with token #" + token + ", assigned to " + doctor.fullName());
+        return saved;
     }
 
-    /**
-     * Central State Machine Engine.
-     * Transitions visit statuses across authorized workflow boundaries and logs actions in the history ledger.
-     */
+    /** State change + audit event in one transaction. */
     @Transactional
-    public void transitionStatus(Long visitId, VisitStatus targetStatus, String actorUsername, String customLogNote) {
+    public void transitionStatus(Long visitId, Set<VisitStatus> allowedFrom, VisitStatus target,
+                                 String actor, String note) {
         Visit visit = visitRepository.findById(visitId)
-                .orElseThrow(() -> new IllegalArgumentException("Encounter visit file record not found for ID: " + visitId));
-
-        String historicalPreviousStatus = visit.getStatus().name();
-
-        // Business Rule Checks: Capture timestamp adjustments for milestones
-        if (targetStatus == VisitStatus.IN_CONSULTATION) {
-            visit.setConsultationStartedAt(OffsetDateTime.now());
-        } else if (targetStatus == VisitStatus.COMPLETED || targetStatus == VisitStatus.CANCELLED) {
-            visit.setCompletedAt(OffsetDateTime.now());
+                .orElseThrow(() -> new ResourceNotFoundException("Visit not found: " + visitId));
+        VisitStatus from = visit.getStatus();
+        if (from == target) return;
+        if (!allowedFrom.contains(from)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Visit is " + from + "; cannot move to " + target);
         }
-
-        // Update active database row
-        visit.setStatus(targetStatus);
-        visitRepository.save(visit);
-
-        // Drop automated append-only audit tracking record
-        VisitEvent transitionLog = new VisitEvent(
-                visit.getId(),
-                historicalPreviousStatus,
-                targetStatus.name(),
-                actorUsername,
-                customLogNote
-        );
-        visitEventRepository.save(transitionLog);
+        visit.setStatus(target);
+        recordEvent(visitId, from, target, actor, note);
     }
 
-    /**
-     * Reads current active queue waiting panel details for a specific doctor.
-     */
     @Transactional(readOnly = true)
-    public List<Visit> getActiveDoctorQueue(String doctorUsername) {
-        LocalDate todayInNepal = LocalDate.now();
-        // Fetches only patients who have finished triage and are waiting to see the doctor
-        return visitRepository.findActiveQueue(doctorUsername, todayInNepal, VisitStatus.TRIAGED);
+    public List<VisitQueueItem> getDoctorQueue(String doctorUsername, Collection<VisitStatus> statuses) {
+        return visitRepository.findDoctorQueue(doctorUsername, statuses.stream().map(Enum::name).toList());
     }
 
-    /**
-     * Concludes a patient's outpatient consultation encounter session.
-     * Persists clinical documentation summaries and closes out the active lifecycle tracking token.
-     */
-    @Transactional
-    public void concludeConsultation(Long visitId, VisitConclusionRequest request, String doctorUsername) {
-        // 1. Fetch the target active visit case record
-        Visit visit = visitRepository.findById(visitId)
-                .orElseThrow(() -> new IllegalArgumentException("Medical visit encounter file record not found for ID: " + visitId));
+    /** Order the tests first; only flip the visit to AWAITING_LAB once the lab has accepted the order. */
+    @Transactional(propagation = Propagation.NOT_SUPPORTED) // never hold a DB transaction across the HTTP call
+    public void sendToLab(Long visitId, List<String> testCodes, String clinicalNotes,
+                          String doctor, String authorization) {
+        Visit visit = visitRepository.findWithPatient(visitId)
+                .orElseThrow(() -> new ResourceNotFoundException("Visit not found: " + visitId));
+        requireAssignedDoctor(visit, doctor);
 
-        // 2. Guardrail Constraint: Assert the session is in a logically terminable state
-        if (visit.getStatus() == VisitStatus.COMPLETED || visit.getStatus() == VisitStatus.CANCELLED) {
-            throw new IllegalStateException("This consultation case record session has already been finalized and locked.");
+        Set<VisitStatus> allowed = EnumSet.of(VisitStatus.TRIAGED, VisitStatus.IN_CONSULTATION);
+        if (!allowed.contains(visit.getStatus())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Visit is " + visit.getStatus() + "; cannot send to lab");
         }
 
-        String historicalPreviousStatus = visit.getStatus().name();
+        String history = clinicalNotes != null && !clinicalNotes.isBlank() ? clinicalNotes.trim() : visit.getChiefComplaint();
+        Long labOrderId = labIntegrationService.raiseLabInvestigationOrder(
+                visitId, visit.getPatient().getMrn(), visit.getPatient().getFullName(), testCodes, history, authorization);
 
-        // 3. Populate final clinical summary records onto the entity row instance
-        visit.setConsultationNotes(request.getConsultationNotes().trim());
-        visit.setDiagnosis(request.getDiagnosis().trim());
-        visit.setStatus(VisitStatus.COMPLETED);
-        visit.setCompletedAt(OffsetDateTime.now()); // Captured precisely via your default Nepal timezone settings
-
-        Visit savedVisit = visitRepository.save(visit);
-
-        // 4. Drop automated append-only clinical audit history tracking record
-        VisitEvent conclusionLog = new VisitEvent(
-                savedVisit.getId(),
-                historicalPreviousStatus,
-                VisitStatus.COMPLETED.name(),
-                doctorUsername,
-                "Consultation successfully finalized by attending doctor. Diagnosis: " + request.getDiagnosis().trim()
-        );
-        visitEventRepository.save(conclusionLog);
+        int updated = visitRepository.markSentToLab(visitId, allowed, VisitStatus.AWAITING_LAB, labOrderId);
+        if (updated == 0) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Lab order created but the visit changed concurrently");
+        }
+        recordEvent(visitId, visit.getStatus(), VisitStatus.AWAITING_LAB, doctor,
+                "Lab order #" + labOrderId + ": " + String.join(", ", testCodes));
     }
 
+    @Transactional(readOnly = true)
+    public List<VisitQueueItem> getTriageQueue() {
+        return visitRepository.findTriageQueue();
+    }
+
+    @Transactional(readOnly = true)
+    public List<VisitQueueItem> getTodaysVisits() {
+        return visitRepository.findTodaysVisits();
+    }
+
+    @Transactional(readOnly = true)
+    public VisitQueueItem queueItem(Long visitId) {
+        return visitRepository.findQueueItem(visitId)
+                .orElseThrow(() -> new ResourceNotFoundException("Visit not found: " + visitId));
+    }
+
+    @Transactional(readOnly = true)
+    public List<VisitEvent> history(Long visitId) {
+        return visitEventRepository.findByVisitIdOrderByOccurredAtAsc(visitId);
+    }
+
+    public void recordEvent(Long visitId, VisitStatus from, VisitStatus to, String actor, String note) {
+        visitEventRepository.save(new VisitEvent(visitId, from == null ? null : from.name(), to.name(), actor, note));
+    }
+
+    /** Doctors may only act on their own patients. */
+    public static void requireAssignedDoctor(Visit visit, String doctor) {
+        if (visit.getAssignedDoctorUsername() != null && !visit.getAssignedDoctorUsername().equals(doctor)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "This patient is assigned to another doctor");
+        }
+    }
 }

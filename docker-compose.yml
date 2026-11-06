@@ -1,151 +1,132 @@
-version: '3.8'
+# Jeevan Bikas Hospital: OPD + Lab microservices
+#   docker compose up --build      ->  UI on http://localhost:3000, API gateway on http://localhost:8080
+# Secrets come from .env (see .env.example); the defaults below are for local demos only.
+
+x-jwt: &jwt
+  APP_JWT_SECRET: ${APP_JWT_SECRET:-dGhpcy1pcy1hLXN1cGVyLXNlY3VyZS1hbmQtbG9uZy1zZWNyZXQta2V5LWZvci1qc29uLXdlYi10b2tlbnM=}
+
+x-internal: &internal
+  INTERNAL_SERVICES_SECRET: ${INTERNAL_SERVICES_SECRET:-3e7c8a9f2b4d6e8a1c3f5b7d9e0a2c4e6f8b0d2e4f6a8c0b2d4e6f8a0c2b4d6e}
 
 services:
-  # =========================================================================
-  # DATABASE 1: Dedicated Exclusively to the Authentication Service
-  # =========================================================================
+  # ---------------------------------------------------------------- databases (one per service)
   auth-postgres-db:
     image: postgres:15-alpine
     container_name: hospital-auth-db
-    ports:
-      - "5431:5432" 
+    ports: ["5431:5432"]
     environment:
-      - POSTGRES_DB=auth_records_db
-      - POSTGRES_USER=auth_admin
-      - POSTGRES_PASSWORD=auth_secure_password
-    volumes:
-      - auth_db_data:/var/lib/postgresql/data
+      POSTGRES_DB: auth_records_db
+      POSTGRES_USER: auth_admin
+      POSTGRES_PASSWORD: ${AUTH_DB_PASSWORD:-auth_secure_password}
+    volumes: [auth_db_data:/var/lib/postgresql/data]
+    networks: [jb-network]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U auth_admin -d auth_records_db"]
       interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 10
 
-  # =========================================================================
-  # DATABASE 2: Dedicated Exclusively to the OPD Service
-  # =========================================================================
   opd-postgres-db:
     image: postgres:15-alpine
     container_name: hospital-opd-db
-    ports:
-      - "5455:5432" 
+    ports: ["5455:5432"]
     environment:
-      - POSTGRES_DB=opd_clinical_db
-      - POSTGRES_USER=opd_admin
-      - POSTGRES_PASSWORD=opd_secure_password
-    volumes:
-      - opd_db_data:/var/lib/postgresql/data
+      POSTGRES_DB: opd_clinical_db
+      POSTGRES_USER: opd_admin
+      POSTGRES_PASSWORD: ${OPD_DB_PASSWORD:-opd_secure_password}
+    volumes: [opd_db_data:/var/lib/postgresql/data]
+    networks: [jb-network]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U opd_admin -d opd_clinical_db"]
       interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 10
 
-  # =========================================================================
-  # DATABASE 3: Dedicated Exclusively to the Laboratory Service
-  # =========================================================================
   lab-postgres-db:
     image: postgres:15-alpine
     container_name: hospital-lab-db
-    ports:
-      - "5456:5432" 
+    ports: ["5456:5432"]
     environment:
-      - POSTGRES_DB=lab_clinical_db
-      - POSTGRES_USER=lab_admin
-      - POSTGRES_PASSWORD=lab_secure_password
-    volumes:
-      - lab_db_data:/var/lib/postgresql/data
+      POSTGRES_DB: lab_clinical_db
+      POSTGRES_USER: lab_admin
+      POSTGRES_PASSWORD: ${LAB_DB_PASSWORD:-lab_secure_password}
+    volumes: [lab_db_data:/var/lib/postgresql/data]
+    networks: [jb-network]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U lab_admin -d lab_clinical_db"]
       interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 10
 
-  # =========================================================================
-  # MICROSERVICE 1: Authentication Engine (Shifted to 8081 to clear 8080)
-  # =========================================================================
+  # ---------------------------------------------------------------- services
   jb-auth-api:
-    build:
-      context: ./jb-auth-service
-      dockerfile: Dockerfile
-    container_name: company-secure-api
-    expose:
-      - "8081" 
+    build: ./jb-auth-service
+    container_name: jb-auth-service
+    expose: ["8081"]
     depends_on:
-      auth-postgres-db:
-        condition: service_healthy
+      auth-postgres-db: { condition: service_healthy }
     environment:
-      - SPRING_APPLICATION_JSON={"server.port":8081} 
-      - SPRING_DOCKER_COMPOSE_ENABLED=false
-      - APP_JWT_SECRET=dGhpcy1pcy1hLXN1cGVyLXNlY3VyZS1hbmQtbG9uZy1zZWNyZXQta2V5LWZvci1qc29uLXdlYi10b2tlbnM=
-      - APP_JWT_EXPIRATION_MS=86400000
-      - SPRING_DATASOURCE_URL=jdbc:postgresql://auth-postgres-db:5432/auth_records_db
-      - SPRING_DATASOURCE_USERNAME=auth_admin
-      - SPRING_DATASOURCE_PASSWORD=auth_secure_password
+      <<: [*jwt, *internal]
+      APP_JWT_EXPIRATION_MS: ${APP_JWT_EXPIRATION_MS:-28800000}   # 8-hour shift
+      APP_SEED_DEMO_USERS: ${APP_SEED_DEMO_USERS:-true}
+      APP_SEED_DEMO_PASSWORD: ${APP_SEED_DEMO_PASSWORD:-Demo@1234}
+      SPRING_DATASOURCE_URL: jdbc:postgresql://auth-postgres-db:5432/auth_records_db
+      SPRING_DATASOURCE_USERNAME: auth_admin
+      SPRING_DATASOURCE_PASSWORD: ${AUTH_DB_PASSWORD:-auth_secure_password}
+    networks: [jb-network]
+    restart: unless-stopped
 
-  # =========================================================================
-  # MICROSERVICE 2: Outpatient Department Service (Exposed on 8082)
-  # =========================================================================
   jb-opd-service:
-    build:
-      context: ./jb-opd-service
-      dockerfile: Dockerfile
+    build: ./jb-opd-service
     container_name: jb-opd-service
-    expose:
-      - "8082"
+    expose: ["8082"]
     depends_on:
-      opd-postgres-db:
-        condition: service_healthy
+      opd-postgres-db: { condition: service_healthy }
+      jb-auth-api: { condition: service_started }
     environment:
-      - SPRING_APPLICATION_JSON={"server.port":8082}
-      - APP_JWT_SECRET=dGhpcy1pcy1hLXN1cGVyLXNlY3VyZS1hbmQtbG9uZy1zZWNyZXQta2V5LWZvci1qc29uLXdlYi10b2tlbnM=
-      - SPRING_DATASOURCE_URL=jdbc:postgresql://opd-postgres-db:5432/opd_clinical_db
-      - SPRING_DATASOURCE_USERNAME=opd_admin
-      - SPRING_DATASOURCE_PASSWORD=opd_secure_password
-      - SPRING_FLYWAY_SCHEMAS=public
-      - SPRING_JPA_PROPERTIES_HIBERNATE_DEFAULT_SCHEMA=public
-    restart: always
+      <<: [*jwt, *internal]
+      SPRING_DATASOURCE_URL: jdbc:postgresql://opd-postgres-db:5432/opd_clinical_db
+      SPRING_DATASOURCE_USERNAME: opd_admin
+      SPRING_DATASOURCE_PASSWORD: ${OPD_DB_PASSWORD:-opd_secure_password}
+      AUTH_SERVICE_URL: http://jb-auth-api:8081
+      LAB_SERVICE_URL: http://jb-lab-service:8083
+    networks: [jb-network]
+    restart: unless-stopped
 
-  # =========================================================================
-  # MICROSERVICE 4: Laboratory Service (Exposed on 8083)
-  # =========================================================================
   jb-lab-service:
-    build:
-      context: ./jb-lab-service
-      dockerfile: Dockerfile
+    build: ./jb-lab-service
     container_name: jb-lab-service
-    expose:
-      - "8083"
+    expose: ["8083"]
     depends_on:
-      lab-postgres-db:
-        condition: service_healthy
+      lab-postgres-db: { condition: service_healthy }
     environment:
-      - SPRING_APPLICATION_JSON={"server.port":8083}
-      - APP_JWT_SECRET=dGhpcy1pcy1hLXN1cGVyLXNlY3VyZS1hbmQtbG9uZy1zZWNyZXQta2V5LWZvci1qc29uLXdlYi10b2tlbnM=
-      - SPRING_DATASOURCE_URL=jdbc:postgresql://lab-postgres-db:5432/lab_clinical_db
-      - SPRING_DATASOURCE_USERNAME=lab_admin
-      - SPRING_DATASOURCE_PASSWORD=lab_secure_password
-      - SPRING_FLYWAY_SCHEMAS=public
-      - SPRING_JPA_PROPERTIES_HIBERNATE_DEFAULT_SCHEMA=public
-    restart: always
+      <<: *jwt
+      SPRING_DATASOURCE_URL: jdbc:postgresql://lab-postgres-db:5432/lab_clinical_db
+      SPRING_DATASOURCE_USERNAME: lab_admin
+      SPRING_DATASOURCE_PASSWORD: ${LAB_DB_PASSWORD:-lab_secure_password}
+    networks: [jb-network]
+    restart: unless-stopped
 
-  # =========================================================================
-  # MICROSERVICE 3: API Gateway (Owns 8080 Cleanly)
-  # =========================================================================
   jb-gateway:
-    build:
-      context: ./jb-gateway
-      dockerfile: Dockerfile
+    build: ./jb-gateway
     container_name: jb-gateway
-    ports:
-      - "8080:8080"
-    depends_on:
-      - jb-auth-api
-      - jb-opd-service
-      - jb-lab-service
-    restart: always
+    ports: ["8080:8080"]
+    depends_on: [jb-auth-api, jb-opd-service, jb-lab-service]
+    networks: [jb-network]
+    restart: unless-stopped
 
-# DEFINES SEPARATE STORAGE VOLUMES TO PREVENT DATA CORRUPTION
+  jb-hospital-ui:
+    build: ./jb-hospital-ui
+    container_name: jb-hospital-ui
+    ports: ["3000:80"]
+    depends_on: [jb-gateway]
+    networks: [jb-network]
+    restart: unless-stopped
+
+networks:
+  jb-network:
+    driver: bridge
+
 volumes:
   auth_db_data:
   opd_db_data:

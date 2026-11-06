@@ -1,69 +1,61 @@
 package com.hospital.auth.exception;
 
-import com.hospital.auth.controller.AuthController;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
+import org.springframework.http.HttpStatusCode;
+import org.springframework.http.ProblemDetail;
+import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.server.ResponseStatusException;
 
-import java.nio.file.AccessDeniedException;
-import java.time.Instant;
-import java.util.LinkedHashMap;
-import java.util.Map;
+import java.util.stream.Collectors;
 
+/** Every error leaves this service as RFC 7807 problem+json with a human-readable "detail". */
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
-    @ExceptionHandler(AuthController.BadCredentialsException.class)
-    public ResponseEntity<Map<String, Object>> badCredentials(AuthController.BadCredentialsException ex) {
-        return body(HttpStatus.UNAUTHORIZED, ex.getMessage());
-    }
+    private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
-    @ExceptionHandler(AccessDeniedException.class)
-    public ResponseEntity<Map<String, Object>> denied(AccessDeniedException ex) {
-        return body(HttpStatus.FORBIDDEN, "Access denied");
-    }
-
-    @ExceptionHandler(IllegalArgumentException.class)
-    public ResponseEntity<Map<String, Object>> badRequest(IllegalArgumentException ex) {
-        return body(HttpStatus.BAD_REQUEST, ex.getMessage());
+    @ExceptionHandler(InvalidCredentialsException.class)
+    public ProblemDetail invalidCredentials(InvalidCredentialsException ex) {
+        return problem(HttpStatus.UNAUTHORIZED, ex.getMessage());
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
-    public ResponseEntity<Map<String, Object>> validation(MethodArgumentNotValidException ex) {
+    public ProblemDetail validation(MethodArgumentNotValidException ex) {
         String msg = ex.getBindingResult().getFieldErrors().stream()
                 .map(e -> e.getField() + " " + e.getDefaultMessage())
-                .reduce((a, b) -> a + "; " + b).orElse("Validation failed");
-        return body(HttpStatus.BAD_REQUEST, msg);
+                .collect(Collectors.joining("; "));
+        return problem(HttpStatus.BAD_REQUEST, msg.isEmpty() ? "Validation failed" : msg);
+    }
+
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ProblemDetail unreadable(HttpMessageNotReadableException ex) {
+        return problem(HttpStatus.BAD_REQUEST, "Malformed request body");
+    }
+
+    @ExceptionHandler(ResponseStatusException.class)
+    public ProblemDetail status(ResponseStatusException ex) {
+        return problem(ex.getStatusCode(), ex.getReason() != null ? ex.getReason() : ex.getMessage());
+    }
+
+    /** Let Spring Security turn these into its own 401/403 responses. */
+    @ExceptionHandler(AccessDeniedException.class)
+    public void accessDenied(AccessDeniedException ex) {
+        throw ex;
     }
 
     @ExceptionHandler(Exception.class)
-    public ResponseEntity<Map<String, Object>> generic(Exception ex) throws Exception {
-        
-        // CRITICAL DEPLOYMENT FIX: Pass through Spring Security exceptions to let them render as clean 403 blocks
-        if (ex instanceof org.springframework.security.access.AccessDeniedException || 
-            ex instanceof org.springframework.security.authorization.AuthorizationDeniedException) {
-            throw ex; 
-        }
-
-        // Standard generic 500 error handler fallback format mapping
-        Map<String, Object> body = Map.of(
-            "timestamp", Instant.now().toString(),
-            "status", HttpStatus.INTERNAL_SERVER_ERROR.value(),
-            "error", "Internal Server Error",
-            "message", "Unexpected error"
-        );
-        
-        return new ResponseEntity<>(body, HttpStatus.INTERNAL_SERVER_ERROR);
+    public ProblemDetail unexpected(Exception ex) {
+        log.error("Unhandled error", ex);
+        return problem(HttpStatus.INTERNAL_SERVER_ERROR, "Unexpected server error");
     }
 
-    private ResponseEntity<Map<String, Object>> body(HttpStatus status, String message) {
-        Map<String, Object> m = new LinkedHashMap<>();
-        m.put("timestamp", Instant.now().toString());
-        m.put("status", status.value());
-        m.put("error", status.getReasonPhrase());
-        m.put("message", message);
-        return ResponseEntity.status(status).body(m);
+    private static ProblemDetail problem(HttpStatusCode status, String detail) {
+        return ProblemDetail.forStatusAndDetail(status, detail);
     }
 }

@@ -1,41 +1,40 @@
 server:
-  port: 8080 # The single open gateway entrypoint for the entire architecture
+  port: 8080 # single public entry point for every API call
 
 spring:
   application:
     name: jb-gateway
   cloud:
     gateway:
-      # CENTRALIZED SECURITY FACTOR: Global CORS Policy Configurations
+      # The UI normally calls the gateway same-origin (through nginx or the Vite dev proxy),
+      # so CORS only matters when the UI is served from another origin.
       globalcors:
         cors-configurations:
           '[/**]':
-            allowedOrigins: "http://localhost:3000" # Allows only your frontend Web App (e.g. React/Next.js)
-            allowedMethods:
-              - GET
-              - POST
-              - PUT
-              - DELETE
-              - OPTIONS
+            allowedOrigins:
+              - "http://localhost:3000"
+              - "http://localhost:5173"
+            allowedMethods: [GET, POST, PUT, PATCH, DELETE, OPTIONS]
             allowedHeaders: "*"
             allowCredentials: true
-
-      # THE ROUTING ENGINE
       routes:
-        # 1. Routing for the Authentication Service
         - id: auth-service-route
-          uri: http://company-secure-api:8081 # ◄ FIXED: Updated to target port 8081
+          uri: ${AUTH_SERVICE_URL:http://jb-auth-api:8081}
           predicates:
             - Path=/api/v1/auth/**
-
-        # 2. Routing for the Outpatient Department (OPD) Service
+          filters:
+            # Internal service-to-service lookups authenticate with this header; strip it from outside traffic.
+            - RemoveRequestHeader=X-Internal-Secret
         - id: opd-service-route
-          uri: http://jb-opd-service:8082 
+          uri: ${OPD_SERVICE_URL:http://jb-opd-service:8082}
           predicates:
             - Path=/api/v1/opd/**
-        
-        # 3. Routing for the Laboratory Service
         - id: lab-service-route
-          uri: http://jb-lab-service:8083 
+          uri: ${LAB_SERVICE_URL:http://jb-lab-service:8083}
           predicates:
             - Path=/api/v1/lab/**
+
+logging:
+  level:
+    root: INFO
+    org.springframework.cloud.gateway: INFO

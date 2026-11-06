@@ -1,17 +1,21 @@
 package com.hospital.lab.controller;
 
-import com.hospital.lab.dto.LabResultSubmissionRequest;
 import com.hospital.lab.dto.LabResultResponse;
 import com.hospital.lab.service.LabResultService;
-import jakarta.validation.Valid;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
-import org.springframework.security.core.annotation.AuthenticationPrincipal;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
 
+/**
+ * Read access to lab results.
+ * Results are written via POST /api/v1/lab/orders/{id}/results (LabOrderController),
+ * which saves every parameter and completes the order in one transaction.
+ */
 @RestController
 @RequestMapping("/api/v1/lab/results")
 public class LabResultController {
@@ -23,28 +27,12 @@ public class LabResultController {
     }
 
     /**
-     * Input diagnostic measurement metrics for a specific patient lab order.
-     * Restricted strictly to authorized Lab Technicians.
-     */
-    @PostMapping
-    @PreAuthorize("hasRole('LABTECH')")
-    public ResponseEntity<LabResultResponse> inputResultValues(
-            @Valid @RequestBody LabResultSubmissionRequest request,
-            @AuthenticationPrincipal String technicianUsername) {
-        
-        String actor = technicianUsername != null ? technicianUsername : "LAB_TECH_ACTOR";
-        LabResultResponse response = labResultService.submitResult(request, actor);
-        return new ResponseEntity<>(response, HttpStatus.CREATED);
-    }
-
-    /**
-     * Retrieve the documented test parameters for a given order encounter.
-     * Accessible by Doctors (to review findings) and Technicians.
+     * All recorded results for a lab order.
+     * Doctors review findings; lab techs and admins can view what was entered.
      */
     @GetMapping("/order/{orderId}")
-    @PreAuthorize("hasAnyRole('DOCTOR', 'TECHNICIAN', 'ADMIN')")
+    @PreAuthorize("hasAnyRole('DOCTOR', 'LABTECH', 'ADMIN')")
     public ResponseEntity<List<LabResultResponse>> viewOrderResults(@PathVariable Long orderId) {
-        List<LabResultResponse> response = labResultService.getResultsByOrder(orderId);
-        return ResponseEntity.ok(response);
+        return ResponseEntity.ok(labResultService.getResultsByOrder(orderId));
     }
 }

@@ -2,26 +2,30 @@ package com.hospital.auth.service;
 
 import com.hospital.auth.dto.LoginRequest;
 import com.hospital.auth.dto.LoginResponse;
+import com.hospital.auth.dto.StaffSummary;
 import com.hospital.auth.dto.UserRegisterRequest;
+import com.hospital.auth.exception.InvalidCredentialsException;
 import com.hospital.auth.model.UserAccount;
 import com.hospital.auth.repository.UserAccountRepository;
 import com.hospital.auth.util.JwtTokenProvider;
+import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.time.OffsetDateTime;
 import java.util.List;
+import java.util.Locale;
 
 @Service
-public class AuthService { // Actively driving Entity Control
+public class AuthService {
 
     private final UserAccountRepository userAccountRepository;
     private final PasswordEncoder passwordEncoder;
-    private final JwtTokenProvider tokenProvider; // REPAIRED: Injected missing cryptographic component
+    private final JwtTokenProvider tokenProvider;
 
-    // Explicit constructor injecting all dependencies required by the business logic
-    public AuthService(UserAccountRepository userAccountRepository, 
+    public AuthService(UserAccountRepository userAccountRepository,
                        PasswordEncoder passwordEncoder,
                        JwtTokenProvider tokenProvider) {
         this.userAccountRepository = userAccountRepository;
@@ -31,57 +35,66 @@ public class AuthService { // Actively driving Entity Control
 
     @Transactional
     public UserAccount registerNewUser(UserRegisterRequest request) {
-        // 1. Business Logic Control Rule: Validate if entity already exists
-        if (userAccountRepository.findByEmail(request.getEmail()).isPresent()) {
-            throw new IllegalArgumentException("Email is already registered in the hospital system.");
+        String username = request.getUsername().trim();
+        String email = request.getEmail().trim().toLowerCase(Locale.ROOT);
+
+        if (userAccountRepository.existsByUsername(username)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Username is already taken.");
         }
-        
-        if (userAccountRepository.findByUsername(request.getUsername()).isPresent()) {
-            throw new IllegalArgumentException("Username is already taken in the hospital system.");
+        if (userAccountRepository.existsByEmail(email)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Email is already registered.");
         }
 
-        // 2. Control flow handling data transformation
-        UserAccount newUser = new UserAccount();
-        newUser.setUsername(request.getUsername().trim());
-        newUser.setEmail(request.getEmail().trim());
-        
-        // Enforce hospital security rule: encrypt passwords before saving
-        newUser.setPassword(passwordEncoder.encode(request.getPassword())); 
-        
-        // Handle role parsing rules safely
-        String finalRole = request.getRole();
-        newUser.setRole((finalRole == null || finalRole.trim().isEmpty()) ? "PATIENT" : finalRole.trim().toUpperCase());
-        newUser.setEnabled(true);
-        newUser.setCreatedAt(OffsetDateTime.now());
-
-        // 3. Command the repository to save the structural Entity state
-        return userAccountRepository.save(newUser);
+        UserAccount user = new UserAccount();
+        user.setUsername(username);
+        user.setEmail(email);
+        user.setPassword(passwordEncoder.encode(request.getPassword()));
+        user.setRole(request.getRole().trim().toUpperCase(Locale.ROOT));
+        user.setEnabled(true);
+        user.setCreatedAt(OffsetDateTime.now());
+        user.setFullName(request.getFullName().trim());
+        user.setDepartment(trimToNull(request.getDepartment(), true));
+        user.setLicenseNumber(trimToNull(request.getLicenseNumber(), false));
+        user.setSpecialization(trimToNull(request.getSpecialization(), false));
+        return userAccountRepository.save(user);
     }
 
+    @Transactional(readOnly = true)
     public LoginResponse authenticateUser(LoginRequest request) {
-        // REPAIRED: Changed 'userRepository' to 'userAccountRepository' to match constructor variable
-        UserAccount user = userAccountRepository.findByUsername(request.getUsername())
-                .orElseThrow(() -> new RuntimeException("Invalid username or password."));
-        
-        if (!passwordEncoder.matches(request.getPassword(), user.getPassword())) {
-            throw new RuntimeException("Invalid username or password.");
-        }
+        // Same message for unknown user, wrong password and disabled account: don't leak which one it was.
+        UserAccount user = userAccountRepository.findByUsername(request.username().trim())
+                .filter(UserAccount::isEnabled)
+                .filter(u -> passwordEncoder.matches(request.password(), u.getPassword()))
+                .orElseThrow(() -> new InvalidCredentialsException("Invalid username or password."));
 
-        if (!user.isEnabled()) {
-            throw new RuntimeException("This user account has been deactivated.");
-        }
+        String token = tokenProvider.generateToken(user.getUsername(), user.getRole(), user.getFullName());
+        return new LoginResponse(token, "Bearer", tokenProvider.getExpirationMs(),
+                user.getUsername(), user.getFullName(), user.getRole());
+    }
 
-        // Issue cryptographic access tokens based on internal Entity properties
-        List<String> rolesList = List.of(user.getRole());
-        String token = tokenProvider.generateToken(user.getUsername(), rolesList);
-        
-        // REPAIRED: Structured response mapping to cleanly match the LoginResponse template
-        return new LoginResponse(
-                token, 
-                "Bearer", 
-                tokenProvider.getExpirationMs(), 
-                user.getUsername(), 
-                user.getRole()
-        );
+    @Transactional(readOnly = true)
+    public List<StaffSummary> listActiveDoctors() {
+        return userAccountRepository.findByRoleAndEnabledTrueOrderByFullNameAsc("DOCTOR").stream()
+                .map(AuthService::toSummary)
+                .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public StaffSummary resolveUser(String username) {
+        return userAccountRepository.findByUsername(username)
+                .filter(UserAccount::isEnabled)
+                .map(AuthService::toSummary)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found: " + username));
+    }
+
+    private static StaffSummary toSummary(UserAccount u) {
+        return new StaffSummary(u.getId(), u.getUsername(), u.getFullName(), u.getRole(),
+                u.getDepartment(), u.getSpecialization());
+    }
+
+    private static String trimToNull(String value, boolean upper) {
+        if (value == null || value.isBlank()) return null;
+        String t = value.trim();
+        return upper ? t.toUpperCase(Locale.ROOT) : t;
     }
 }

@@ -1,0 +1,10 @@
+node_modules
+dist
+.tmp
+build
+.production.env
+.local.env
+.DS_Store
+.git
+.gitignore
+README.md

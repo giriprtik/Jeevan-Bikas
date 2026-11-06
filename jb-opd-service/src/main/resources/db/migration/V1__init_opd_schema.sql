@@ -38,14 +38,14 @@ CREATE TABLE patients (
 CREATE TABLE visits (
     id                      BIGSERIAL PRIMARY KEY,
     patient_id              BIGINT      NOT NULL REFERENCES patients (id),
+    assigned_doctor_id      UUID,
     visit_date              DATE        NOT NULL,
     token_number            INTEGER     NOT NULL,
     chief_complaint         TEXT        NOT NULL,
     priority                VARCHAR(15) NOT NULL CHECK (priority IN ('NORMAL', 'URGENT', 'EMERGENCY')),
     status                  VARCHAR(25) NOT NULL CHECK (status IN ('REGISTERED', 'TRIAGED', 'IN_CONSULTATION',
                                                                     'AWAITING_LAB', 'LAB_RESULTS_READY', 'COMPLETED', 'CANCELLED')),
-    assigned_doctor         VARCHAR(50),  -- Captured directly from Auth token usernames (e.g. 'doctor_smith')
-    assigned_doctor_name    VARCHAR(150), -- Decoupled descriptive name for reporting convenience
+    assigned_doctor_name    VARCHAR(150),
     consultation_notes      TEXT,
     diagnosis               TEXT,
     latest_lab_order_id     BIGINT,
@@ -65,6 +65,7 @@ CREATE TABLE vital_signs (
     temperature_celsius NUMERIC(4, 2) NOT NULL,
     pulse_rate          INTEGER      NOT NULL,
     blood_pressure      VARCHAR(20)  NOT NULL,
+    oxygen_saturation   INTEGER      NOT NULL, 
     symptoms_brief      TEXT,
     recorded_by         VARCHAR(50)  NOT NULL,
     recorded_at         TIMESTAMPTZ  NOT NULL DEFAULT CURRENT_TIMESTAMP

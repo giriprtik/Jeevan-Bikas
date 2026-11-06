@@ -32,7 +32,6 @@ public class LabResultService {
 
     /**
      * Records a diagnostic observation result parameter entry.
-     * Automatically transitions the parent order status to COMPLETED upon entry.
      */
     @Transactional
     public LabResultResponse submitResult(LabResultSubmissionRequest request, String technicianUsername) {
@@ -66,10 +65,7 @@ public class LabResultService {
         // 4. Persist result parameters record
         LabResult savedResult = labResultRepository.save(result);
 
-        // 5. AUTOMATION HOOK: Advance parent order tracking state to COMPLETED automatically
-        labOrder.setOrderStatus(LabOrderStatus.COMPLETED);
-        labOrderRepository.save(labOrder);
-
+        // The parent order is completed by LabResultEntryService once every row is saved.
         return mapToResponse(savedResult);
     }
 

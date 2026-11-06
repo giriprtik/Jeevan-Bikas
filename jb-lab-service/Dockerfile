@@ -1,23 +1,17 @@
-# === STAGE 1: Build the Java Application ===
+# ---- build ----
 FROM maven:3.9.6-eclipse-temurin-17 AS build
-WORKDIR /app
-
-# Copy the build configuration files and source code
+WORKDIR /build
 COPY pom.xml .
+RUN mvn -B -q dependency:go-offline
 COPY src ./src
+RUN mvn -B -q -DskipTests package
 
-# Compile the application and pack it into a execution .jar file
-RUN mvn clean package -DskipTests
-
-# === STAGE 2: Create the Lightweight Runtime Image ===
+# ---- runtime ----
 FROM eclipse-temurin:17-jre-jammy
 WORKDIR /app
-
-# Copy the compiled jar from the build stage into our slim runtime container
-COPY --from=build /app/target/*.jar app.jar
-
-# Inform Docker that the container will listen on port 8080 at runtime
-EXPOSE 8080
-
-# The execution command to launch the Spring Boot app when the container starts
-ENTRYPOINT ["java", "-jar", "app.jar"]
+RUN groupadd --system app && useradd --system --gid app --no-create-home app
+COPY --from=build /build/target/jbikas-lab-service-0.0.1-SNAPSHOT.jar app.jar
+USER app
+EXPOSE 8083
+ENV JAVA_OPTS="-XX:+UseG1GC -XX:MaxRAMPercentage=75 -XX:+ExitOnOutOfMemoryError"
+ENTRYPOINT ["sh", "-c", "exec java $JAVA_OPTS -jar app.jar"]

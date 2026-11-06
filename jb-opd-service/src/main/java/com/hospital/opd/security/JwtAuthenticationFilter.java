@@ -1,11 +1,14 @@
 package com.hospital.opd.security;
 
+import com.hospital.opd.util.JwtTokenProvider;
 import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.JwtException;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
-import com.hospital.opd.util.JwtTokenProvider; 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -17,8 +20,11 @@ import java.io.IOException;
 import java.util.Arrays;
 import java.util.List;
 
+/** Verifies the auth service's JWT; the principal is the username (String), authorities come from the "roles" claim. */
 @Component
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
+
+    private static final Logger log = LoggerFactory.getLogger(JwtAuthenticationFilter.class);
 
     private final JwtTokenProvider jwtTokenProvider;
 
@@ -31,40 +37,23 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             throws ServletException, IOException {
 
         String header = req.getHeader("Authorization");
-        
         if (header != null && header.startsWith("Bearer ")) {
             try {
-                String tokenString = header.substring(7);
-                Claims claims = jwtTokenProvider.parse(tokenString);
-
-                // 1. FIXED: Look for the correct plural "roles" key matching your Auth service claim
-                if (claims != null && claims.get("roles") != null) {
-                    String rolesString = claims.get("roles", String.class); // e.g. "NURSE" or "NURSE,STAFF"
-                    
-                    // 2. FIXED: Split the comma-separated string cleanly into a Spring authorities collection
-                    List<SimpleGrantedAuthority> authorities = Arrays.stream(rolesString.split(","))
+                Claims claims = jwtTokenProvider.parse(header.substring(7));
+                String roles = claims.get("roles", String.class);
+                if (claims.getSubject() != null && roles != null && !roles.isBlank()) {
+                    List<SimpleGrantedAuthority> authorities = Arrays.stream(roles.split(","))
                             .map(String::trim)
-                            .map(role -> role.startsWith("ROLE_") ? role : "ROLE_" + role)
+                            .filter(r -> !r.isEmpty())
+                            .map(r -> r.startsWith("ROLE_") ? r : "ROLE_" + r)
                             .map(SimpleGrantedAuthority::new)
                             .toList();
-
-                    System.out.println("=== [JWT SECURITY CHECK SUCCESS] ===");
-                    System.out.println("User logging in: " + claims.getSubject());
-                    System.out.println("Raw roles from JWT token: " + rolesString);
-                    System.out.println("Granted Authorities set in Spring: " + authorities);
-                    System.out.println("====================================");
-                    
-                    var auth = new UsernamePasswordAuthenticationToken(
-                            claims.getSubject(), 
-                            null,
-                            authorities
-                    );
-                    
+                    var auth = new UsernamePasswordAuthenticationToken(claims.getSubject(), null, authorities);
                     auth.setDetails(new WebAuthenticationDetailsSource().buildDetails(req));
                     SecurityContextHolder.getContext().setAuthentication(auth);
                 }
-            } catch (Exception e) {
-                logger.error("JWT Authentication signature validation failed: " + e.getMessage());
+            } catch (JwtException | IllegalArgumentException e) {
+                log.debug("Rejected JWT on {} {}: {}", req.getMethod(), req.getRequestURI(), e.getMessage());
                 SecurityContextHolder.clearContext();
             }
         }

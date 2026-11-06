@@ -4,6 +4,9 @@ import com.hospital.opd.dto.TriageVitalsRequest;
 import com.hospital.opd.dto.TriageVitalsResponse;
 import com.hospital.opd.service.TriageService;
 import jakarta.validation.Valid;
+
+import java.util.List;
+
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -30,9 +33,16 @@ public class TriageController {
             @Valid @RequestBody TriageVitalsRequest request,
             @AuthenticationPrincipal String nurseUsername) {
         
-        String actor = nurseUsername != null ? nurseUsername : "TRIAGE_DESK_NURSE";
-        TriageVitalsResponse response = triageService.recordVitals(request, actor);
+        TriageVitalsResponse response = triageService.recordVitals(request, nurseUsername);
         
         return new ResponseEntity<>(response, HttpStatus.CREATED);
     }
+
+    /** Every vitals reading for a visit, newest first. */
+     @GetMapping("/vitals/visit/{visitId}")
+     @PreAuthorize("hasAnyRole('NURSE', 'DOCTOR', 'ADMIN')")
+     public ResponseEntity<List<TriageVitalsResponse>> getVitalsHistory(@PathVariable Long visitId) {
+         List<TriageVitalsResponse> historyList = triageService.getVitalsHistoryByVisitId(visitId);
+         return ResponseEntity.ok(historyList);
+     }
 }

@@ -27,6 +27,9 @@ public class VitalSigns {
     @Column(name = "blood_pressure", nullable = false, length = 20)
     private String bloodPressure;
 
+    @Column(name = "oxygen_saturation", nullable = false)
+    private Integer oxygenSaturation;
+
     @Column(name = "symptoms_brief", columnDefinition = "TEXT")
     private String symptomsBrief;
 
@@ -52,10 +55,11 @@ public class VitalSigns {
     public void setPulseRate(Integer pulseRate) { this.pulseRate = pulseRate; }
     public String getBloodPressure() { return bloodPressure; }
     public void setBloodPressure(String bloodPressure) { this.bloodPressure = bloodPressure; }
+    public Integer getOxygenSaturation() { return oxygenSaturation; }
+    public void setOxygenSaturation(Integer oxygenSaturation) { this.oxygenSaturation = oxygenSaturation; }
     public String getSymptomsBrief() { return symptomsBrief; }
     public void setSymptomsBrief(String symptomsBrief) { this.symptomsBrief = symptomsBrief; }
     public String getRecordedBy() { return recordedBy; }
     public void setRecordedBy(String recordedBy) { this.recordedBy = recordedBy; }
-    public OffsetDateTime getRecordedAt() { return recordedAt; } // Backwards mapping utility hook alias 
-    public OffsetDateTime getRecordedAtReal() { return recordedAt; }
+    public OffsetDateTime getRecordedAt() { return recordedAt; }
 }

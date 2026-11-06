@@ -2,89 +2,69 @@ package com.hospital.auth.controller;
 
 import com.hospital.auth.dto.LoginRequest;
 import com.hospital.auth.dto.LoginResponse;
+import com.hospital.auth.dto.StaffSummary;
 import com.hospital.auth.dto.UserRegisterRequest;
 import com.hospital.auth.model.UserAccount;
-import org.springframework.security.core.annotation.AuthenticationPrincipal;
-import org.springframework.security.core.userdetails.UserDetails;
 import com.hospital.auth.service.AuthService;
+import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.*;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/v1/auth")
-public class AuthController { // Streamlined Boundary Layer
+public class AuthController {
 
-    private final AuthService authService; // Direct connection hook to Control layer
+    private final AuthService authService;
 
-    // Clean constructor injection bypassing Lombok overhead
     public AuthController(AuthService authService) {
         this.authService = authService;
     }
 
     @PostMapping("/login")
-    public ResponseEntity<?> authenticateUser(@RequestBody LoginRequest loginRequest) {
-        try {
-            // Hand off to Control engine to check credentials and generate token
-            LoginResponse responsePayload = authService.authenticateUser(loginRequest);
-            return ResponseEntity.ok(responsePayload);
-        } catch (RuntimeException ex) {
-            // Catches authentication failures (deactivated accounts, bad credentials)
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                    .body(Map.of(
-                            "error", "Unauthorized", 
-                            "message", ex.getMessage()
-                    ));
-        }
+    public LoginResponse login(@Valid @RequestBody LoginRequest request) {
+        return authService.authenticateUser(request);
     }
 
+    /** Staff accounts are created by an administrator; there is no public sign-up. */
     @PostMapping("/register")
-    public ResponseEntity<?> registerUser(@RequestBody UserRegisterRequest registerRequest) {
-        try {
-            // Hand off to Control engine to run validations and persist entity
-            UserAccount createdAccount = authService.registerNewUser(registerRequest);
-            
-            // Build the clean web response payload out of the returned Entity state
-            return ResponseEntity.status(HttpStatus.CREATED).body(Map.of(
-                    "message", "User registered successfully!",
-                    "username", createdAccount.getUsername(),
-                    "role", createdAccount.getRole()
-            ));
-        } catch (IllegalArgumentException ex) {
-            // Translates specific Control layer validation errors into standard 400 Bad Requests
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                    .body(Map.of(
-                            "error", "Bad Request", 
-                            "message", ex.getMessage()
-                    ));
-        }
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<Map<String, String>> register(@Valid @RequestBody UserRegisterRequest request) {
+        UserAccount created = authService.registerNewUser(request);
+        return ResponseEntity.status(HttpStatus.CREATED).body(Map.of(
+                "username", created.getUsername(),
+                "role", created.getRole()));
     }
 
     @GetMapping("/profile")
-    public ResponseEntity<Map<String, Object>> getUserProfile(@AuthenticationPrincipal UserDetails userDetails) {
-        
-        // Return a secure response containing the user details pulled from the token context
-        return ResponseEntity.ok(Map.of(
-            "status", "Success",
-            "message", "Profile data retrieved securely.",
-            "data", Map.of(
-                "username", userDetails.getUsername(),
-                "authorities", userDetails.getAuthorities(),
-                "accountNonExpired", userDetails.isAccountNonExpired()
-            )
-        ));
+    public StaffSummary profile(@AuthenticationPrincipal UserAccount user) {
+        return authService.resolveUser(user.getUsername());
     }
 
-    @GetMapping("/admin/ping")
-    @PreAuthorize("hasRole('ADMIN')")
-    public String adminPing() {
-        return "{\"message\": \"admin only\"}"; // Hardcoded clean JSON payload bypasses Jackson mapping checks
+    /** Doctor picker for the registration desk. */
+    @GetMapping("/doctors")
+    @PreAuthorize("hasAnyRole('NURSE', 'DOCTOR', 'ADMIN')")
+    public List<StaffSummary> doctors() {
+        return authService.listActiveDoctors();
     }
 
-    public static class BadCredentialsException extends RuntimeException {
-        public BadCredentialsException(String m) { super(m); }
+    /** Internal (service-to-service, X-Internal-Secret): full staff lookup. */
+    @GetMapping("/users/resolve")
+    @PreAuthorize("hasRole('SYSTEM')")
+    public StaffSummary resolve(@RequestParam("username") String username) {
+        return authService.resolveUser(username);
+    }
+
+    /** Internal (service-to-service, X-Internal-Secret): kept for backwards compatibility. */
+    @GetMapping("/users/resolve-id")
+    @PreAuthorize("hasRole('SYSTEM')")
+    public UUID resolveId(@RequestParam("username") String username) {
+        return authService.resolveUser(username).id();
     }
 }
-

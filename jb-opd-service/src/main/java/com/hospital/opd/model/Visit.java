@@ -3,6 +3,7 @@ package com.hospital.opd.model;
 import jakarta.persistence.*;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
+import java.util.UUID;
 
 @Entity
 @Table(name = "visits", uniqueConstraints = {
@@ -35,8 +36,11 @@ public class Visit {
     @Column(name = "status", nullable = false, length = 25)
     private VisitStatus status = VisitStatus.REGISTERED;
 
-    @Column(name = "assigned_doctor", length = 50)
-    private String assignedDoctor;
+    @Column(name = "assigned_doctor_id")
+    private UUID assignedDoctorId;
+
+    @Column(name = "assigned_doctor_username", length = 50)
+    private String assignedDoctorUsername;
 
     @Column(name = "assigned_doctor_name", length = 150)
     private String assignedDoctorName;
@@ -89,8 +93,10 @@ public class Visit {
     public void setPriority(VisitPriority priority) { this.priority = priority; }
     public VisitStatus getStatus() { return status; }
     public void setStatus(VisitStatus status) { this.status = status; }
-    public String getAssignedDoctor() { return assignedDoctor; }
-    public void setAssignedDoctor(String assignedDoctor) { this.assignedDoctor = assignedDoctor; }
+    public UUID getAssignedDoctorId() { return assignedDoctorId; }
+    public void setAssignedDoctorId(UUID assignedDoctorId) { this.assignedDoctorId = assignedDoctorId; }
+    public String getAssignedDoctorUsername() { return assignedDoctorUsername; }
+    public void setAssignedDoctorUsername(String assignedDoctorUsername) { this.assignedDoctorUsername = assignedDoctorUsername; }
     public String getAssignedDoctorName() { return assignedDoctorName; }
     public void setAssignedDoctorName(String assignedDoctorName) { this.assignedDoctorName = assignedDoctorName; }
     public String getConsultationNotes() { return consultationNotes; }

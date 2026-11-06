@@ -2,33 +2,20 @@ package com.hospital.lab.dto;
 
 import com.hospital.lab.model.LabOrderStatus;
 import java.time.OffsetDateTime;
+import java.util.List;
 
-public class LabOrderResponse {
-    private Long id;
-    private Long visitId;
-    private String patientMrn;
-    private String orderedByDoctor;
-    private LabOrderStatus orderStatus;
-    private String clinicalHistory;
-    private OffsetDateTime orderedAt;
+public record LabOrderResponse(
+        Long id,
+        Long visitId,
+        String patientMrn,
+        String patientName,
+        String orderedByDoctor,
+        LabOrderStatus orderStatus,
+        String clinicalHistory,
+        OffsetDateTime orderedAt,
+        List<String> testCodes,
+        /** One entry per ordered test, in order. */
+        List<Sample> samples) {
 
-    public LabOrderResponse(Long id, Long visitId, String patientMrn, String orderedByDoctor, 
-                            LabOrderStatus orderStatus, String clinicalHistory, OffsetDateTime orderedAt) {
-        this.id = id;
-        this.visitId = visitId;
-        this.patientMrn = patientMrn;
-        this.orderedByDoctor = orderedByDoctor;
-        this.orderStatus = orderStatus;
-        this.clinicalHistory = clinicalHistory;
-        this.orderedAt = orderedAt;
-    }
-
-    // Getters
-    public Long getId() { return id; }
-    public Long getVisitId() { return visitId; }
-    public String getPatientMrn() { return patientMrn; }
-    public String getOrderedByDoctor() { return orderedByDoctor; }
-    public LabOrderStatus getOrderStatus() { return orderStatus; }
-    public String getClinicalHistory() { return clinicalHistory; }
-    public OffsetDateTime getOrderedAt() { return orderedAt; }
+    public record Sample(String testCode, boolean collected, String collectedBy, OffsetDateTime collectedAt) {}
 }

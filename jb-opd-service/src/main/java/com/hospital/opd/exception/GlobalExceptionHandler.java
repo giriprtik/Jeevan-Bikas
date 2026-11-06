@@ -2,70 +2,88 @@ package com.hospital.opd.exception;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
+import org.springframework.http.HttpStatusCode;
+import org.springframework.http.ProblemDetail;
+import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.server.ResponseStatusException;
 
-import java.nio.file.AccessDeniedException;
-import java.time.Instant;
-import java.util.LinkedHashMap;
-import java.util.Map;
+import java.util.stream.Collectors;
 
+/** Every error leaves this service as RFC 7807 problem+json with a human-readable "detail". */
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
-    
-    @ExceptionHandler(AccessDeniedException.class)
-    public ResponseEntity<Map<String, Object>> denied(AccessDeniedException ex) {
-        return body(HttpStatus.FORBIDDEN, "Access denied");
+
+    @ExceptionHandler(MethodArgumentNotValidException.class)
+    public ProblemDetail validation(MethodArgumentNotValidException ex) {
+        String msg = ex.getBindingResult().getFieldErrors().stream()
+                .map(e -> e.getField() + " " + e.getDefaultMessage())
+                .collect(Collectors.joining("; "));
+        return problem(HttpStatus.BAD_REQUEST, msg.isEmpty() ? "Validation failed" : msg);
+    }
+
+    @ExceptionHandler({HttpMessageNotReadableException.class, MethodArgumentTypeMismatchException.class})
+    public ProblemDetail unreadable(Exception ex) {
+        return problem(HttpStatus.BAD_REQUEST, "Malformed request: check field values and formats");
+    }
+
+    @ExceptionHandler(ResourceNotFoundException.class)
+    public ProblemDetail notFound(ResourceNotFoundException ex) {
+        return problem(HttpStatus.NOT_FOUND, ex.getMessage());
     }
 
     @ExceptionHandler(IllegalArgumentException.class)
-    public ResponseEntity<Map<String, Object>> badRequest(IllegalArgumentException ex) {
-        return body(HttpStatus.BAD_REQUEST, ex.getMessage());
+    public ProblemDetail badRequest(IllegalArgumentException ex) {
+        return problem(HttpStatus.BAD_REQUEST, ex.getMessage());
     }
 
-    @ExceptionHandler(MethodArgumentNotValidException.class)
-    public ResponseEntity<Map<String, Object>> validation(MethodArgumentNotValidException ex) {
-        String msg = ex.getBindingResult().getFieldErrors().stream()
-                .map(e -> e.getField() + " " + e.getDefaultMessage())
-                .reduce((a, b) -> a + "; " + b).orElse("Validation failed");
-        return body(HttpStatus.BAD_REQUEST, msg);
+    @ExceptionHandler(ObjectOptimisticLockingFailureException.class)
+    public ProblemDetail concurrent(ObjectOptimisticLockingFailureException ex) {
+        return problem(HttpStatus.CONFLICT, "This record was changed by someone else. Refresh and try again.");
+    }
+
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    public ProblemDetail integrity(DataIntegrityViolationException ex) {
+        log.warn("Constraint violation: {}", ex.getMostSpecificCause().getMessage());
+        return problem(HttpStatus.CONFLICT, "The change conflicts with existing data (duplicate or open visit).");
+    }
+
+    @ExceptionHandler(ResponseStatusException.class)
+    public ProblemDetail status(ResponseStatusException ex) {
+        return problem(ex.getStatusCode(), ex.getReason() != null ? ex.getReason() : ex.getMessage());
+    }
+
+    @ExceptionHandler(DownstreamServiceException.class)
+    public ProblemDetail downstream(DownstreamServiceException ex) {
+        ProblemDetail pd = problem(ex.getClientStatus(), ex.getMessage());
+        pd.setTitle("Downstream service error");
+        pd.setProperty("service", ex.getService());
+        pd.setProperty("downstreamStatus", ex.getDownstreamStatus());
+        return pd;
+    }
+
+    /** Let Spring Security turn these into its own 403 response. */
+    @ExceptionHandler(AccessDeniedException.class)
+    public void accessDenied(AccessDeniedException ex) {
+        throw ex;
     }
 
     @ExceptionHandler(Exception.class)
-    public ResponseEntity<Map<String, Object>> generic(Exception ex) throws Exception {
-        
-        if (ex instanceof org.springframework.security.access.AccessDeniedException || 
-            ex instanceof org.springframework.security.authorization.AuthorizationDeniedException) {
-            throw ex; 
-        }
-
-        // 2. CRITICAL FOR DEBUGGING: Log the actual error and full stack trace
-        log.error("Unhandled internal server error occurred: ", ex);
-
-        // 3. Structured map preserving insertion order
-        Map<String, Object> body = new LinkedHashMap<>();
-        body.put("timestamp", Instant.now().toString());
-        body.put("status", HttpStatus.INTERNAL_SERVER_ERROR.value());
-        body.put("error", "Internal Server Error");
-        
-        // 4. OPTIONAL DEVELOPMENT AID: Expose the real message temporarily to debug faster
-        body.put("message", ex.getMessage() != null ? ex.getMessage() : "Unexpected error");
-        // body.put("developerMessage", ex.getClass().getName()); // Uncomment to see the exact Exception class
-
-        return new ResponseEntity<>(body, HttpStatus.INTERNAL_SERVER_ERROR);
+    public ProblemDetail unexpected(Exception ex) {
+        log.error("Unhandled error", ex);
+        return problem(HttpStatus.INTERNAL_SERVER_ERROR, "Unexpected server error");
     }
 
-    private ResponseEntity<Map<String, Object>> body(HttpStatus status, String message) {
-        Map<String, Object> m = new LinkedHashMap<>();
-        m.put("timestamp", Instant.now().toString());
-        m.put("status", status.value());
-        m.put("error", status.getReasonPhrase());
-        m.put("message", message);
-        return ResponseEntity.status(status).body(m);
+    private static ProblemDetail problem(HttpStatusCode status, String detail) {
+        return ProblemDetail.forStatusAndDetail(status, detail);
     }
 }

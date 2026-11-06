@@ -1,6 +1,7 @@
 package com.hospital.opd.config;
 
 import com.hospital.opd.security.JwtAuthenticationFilter;
+import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
@@ -10,9 +11,12 @@ import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 
+import java.io.IOException;
+
+/** Stateless JWT security; per-endpoint role rules are @PreAuthorize on the controllers. */
 @Configuration
 @EnableWebSecurity
-@EnableMethodSecurity // Activates @PreAuthorize features locally inside this microservice
+@EnableMethodSecurity
 public class SecurityConfig {
 
     private final JwtAuthenticationFilter jwtAuthenticationFilter;
@@ -24,22 +28,26 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
-            .csrf(csrf -> csrf.disable()) // Disabled for stateless REST APIs
-            .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-            
+            .csrf(csrf -> csrf.disable())
+            .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+            .httpBasic(b -> b.disable())
+            .formLogin(f -> f.disable())
             .authorizeHttpRequests(auth -> auth
-                // 1. Open up the entry routes so your method-level @PreAuthorize annotations can execute their precise roles
-                .requestMatchers("/api/v1/opd/patients", "/api/v1/opd/patients/**").authenticated()
-                .requestMatchers("/api/v1/opd/visits", "/api/v1/opd/visits/**").authenticated()
-                .requestMatchers("/api/v1/opd/triage", "/api/v1/opd/triage/**").authenticated()
-                
-                // 2. All other unexpected endpoint routes demand authentication processing
-                .anyRequest().authenticated() 
-            )
-            // 3. Keep your custom JWT filter securely processing headers before the username/password filter context
+                .requestMatchers("/actuator/health", "/error").permitAll()
+                .anyRequest().authenticated())
+            .exceptionHandling(ex -> ex
+                .authenticationEntryPoint((req, res, e) ->
+                        problem(res, HttpServletResponse.SC_UNAUTHORIZED, "Unauthorized", "Missing, invalid or expired access token."))
+                .accessDeniedHandler((req, res, e) ->
+                        problem(res, HttpServletResponse.SC_FORBIDDEN, "Forbidden", "Your role is not allowed to do this.")))
             .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
-
         return http.build();
     }
 
+    private static void problem(HttpServletResponse res, int status, String title, String detail) throws IOException {
+        res.setStatus(status);
+        res.setContentType("application/problem+json");
+        res.getWriter().write("{\"type\":\"about:blank\",\"title\":\"" + title + "\",\"status\":" + status
+                + ",\"detail\":\"" + detail + "\"}");
+    }
 }

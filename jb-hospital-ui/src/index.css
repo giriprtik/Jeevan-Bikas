@@ -1,0 +1,46 @@
+@import "tailwindcss";
+
+/* Design tokens: one teal accent on calm neutrals; status colours are reserved for clinical meaning. */
+@theme {
+  --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, monospace;
+
+  --color-canvas: #f4f6f8;
+  --color-surface: #ffffff;
+  --color-subtle: #f8fafb;
+  --color-line: #e3e8ee;
+  --color-line-strong: #cfd7e0;
+
+  --color-ink: #0f1c2a;
+  --color-ink-2: #3c4a5a;
+  --color-ink-3: #6b7888;
+  --color-ink-4: #9aa5b2;
+
+  --color-brand-50: #eef8f7;
+  --color-brand-100: #d5efec;
+  --color-brand-200: #a9dfda;
+  --color-brand-500: #12948f;
+  --color-brand-600: #0d7d79;
+  --color-brand-700: #0b6461;
+  --color-brand-900: #0a3836;
+
+  --shadow-card: 0 1px 2px rgb(15 28 42 / 0.04), 0 1px 3px rgb(15 28 42 / 0.06);
+  --shadow-pop: 0 8px 24px rgb(15 28 42 / 0.12);
+}
+
+@layer base {
+  html { -webkit-font-smoothing: antialiased; }
+  body { @apply bg-canvas text-ink font-sans text-[14px] leading-normal; }
+  ::selection { @apply bg-brand-100; }
+  :focus-visible { @apply outline-2 outline-offset-2 outline-brand-500; }
+}
+
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+.animate-fade-up { animation: fade-up 180ms cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-fade-up, .animate-spin, .animate-pulse { animation: none !important; }
+}
